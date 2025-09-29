@@ -1,0 +1,29 @@
+{
+  "name": "blackswan-oracle",
+  "version": "1.0.0",
+  "description": "BlackSwan Oracle smart contract and Node.js polling service",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "ethers": "^6.8.1",
+    "axios": "^1.5.0",
+    "winston": "^3.10.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "oracle",
+    "ethereum",
+    "blockchain",
+    "blackswan",
+    "smart-contract"
+  ],
+  "author": "Muhammad Bilal Motiwala",
+  "project": "Black Swan",
+  "license": "MIT"
+}
