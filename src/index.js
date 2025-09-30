@@ -26,6 +26,8 @@ const axios = require("axios");
 const winston = require("winston");
 const fs = require("fs");
 const path = require("path");
+const express = require("express");
+const cors = require("cors");
 
 // Configure Winston logger with timestamps and emojis
 const logger = winston.createLogger({
@@ -59,6 +61,20 @@ class BlackSwanOracleService {
     this.lastKnownBlackSwanScore = null;
     this.lastKnownMarketPeakScore = null;
     this.isRunning = false;
+    this.expressApp = null;
+    this.httpServer = null;
+    this.serviceStatus = {
+      status: "starting",
+      uptime: 0,
+      startTime: new Date(),
+      lastUpdate: null,
+      lastSuccessfulUpdate: null,
+      updateCount: 0,
+      errorCount: 0,
+      lastError: null,
+      isHealthy: false,
+    };
+    this.setupExpressServer();
   }
 
   validateEnvironmentVariables() {
@@ -99,6 +115,117 @@ class BlackSwanOracleService {
     }
 
     logger.info("✅ Environment variables validated successfully");
+  }
+
+  setupExpressServer() {
+    this.expressApp = express();
+
+    // Middleware
+    this.expressApp.use(cors());
+    this.expressApp.use(express.json());
+
+    // Health check endpoint
+    this.expressApp.get("/health", (req, res) => {
+      const currentTime = new Date();
+      this.serviceStatus.uptime = Math.floor(
+        (currentTime - this.serviceStatus.startTime) / 1000
+      );
+
+      const healthStatus = {
+        status: this.serviceStatus.status,
+        healthy: this.serviceStatus.isHealthy,
+        uptime: this.serviceStatus.uptime,
+        startTime: this.serviceStatus.startTime,
+        lastUpdate: this.serviceStatus.lastUpdate,
+        lastSuccessfulUpdate: this.serviceStatus.lastSuccessfulUpdate,
+        updateCount: this.serviceStatus.updateCount,
+        errorCount: this.serviceStatus.errorCount,
+        lastError: this.serviceStatus.lastError,
+        service: "BlackSwan Oracle",
+        version: "1.0.0",
+        timestamp: currentTime,
+      };
+
+      // Determine HTTP status based on health
+      const httpStatus = this.serviceStatus.isHealthy ? 200 : 503;
+      res.status(httpStatus).json(healthStatus);
+    });
+
+    // Service status endpoint with more details
+    this.expressApp.get("/status", (req, res) => {
+      const currentTime = new Date();
+      this.serviceStatus.uptime = Math.floor(
+        (currentTime - this.serviceStatus.startTime) / 1000
+      );
+
+      res.json({
+        ...this.serviceStatus,
+        uptime: this.serviceStatus.uptime,
+        currentScores: {
+          blackswanScore: this.lastKnownBlackSwanScore,
+          marketPeakScore: this.lastKnownMarketPeakScore,
+        },
+        configuration: {
+          pollInterval: parseInt(process.env.POLL_INTERVAL) || 60000,
+          apiEndpoint: process.env.API_ENDPOINT,
+          contractAddress: process.env.ORACLE_CONTRACT_ADDRESS,
+          walletAddress: this.wallet ? this.wallet.address : "Not initialized",
+        },
+        service: "BlackSwan Oracle",
+        version: "1.0.0",
+        timestamp: currentTime,
+      });
+    });
+
+    // Scores endpoint to get current cached scores
+    this.expressApp.get("/scores", (req, res) => {
+      res.json({
+        blackswanScore: this.lastKnownBlackSwanScore,
+        marketPeakScore: this.lastKnownMarketPeakScore,
+        lastUpdate: this.serviceStatus.lastUpdate,
+        lastSuccessfulUpdate: this.serviceStatus.lastSuccessfulUpdate,
+        timestamp: new Date(),
+      });
+    });
+
+    // Force update endpoint (for manual triggers)
+    this.expressApp.post("/update", async (req, res) => {
+      try {
+        logger.info("🔄 Manual update triggered via API");
+        await this.checkAndUpdateScores();
+        res.json({
+          success: true,
+          message: "Update check completed",
+          timestamp: new Date(),
+        });
+      } catch (error) {
+        logger.error(`Manual update failed: ${error.message}`);
+        res.status(500).json({
+          success: false,
+          error: error.message,
+          timestamp: new Date(),
+        });
+      }
+    });
+
+    // Root endpoint
+    this.expressApp.get("/", (req, res) => {
+      res.json({
+        service: "BlackSwan Oracle",
+        version: "1.0.0",
+        status: this.serviceStatus.status,
+        healthy: this.serviceStatus.isHealthy,
+        endpoints: {
+          health: "/health",
+          status: "/status",
+          scores: "/scores",
+          update: "POST /update",
+        },
+        timestamp: new Date(),
+      });
+    });
+
+    logger.info("🌐 Express server configured with health check endpoints");
   }
 
   async initializeBlockchainConnection() {
@@ -321,6 +448,7 @@ class BlackSwanOracleService {
   async checkAndUpdateScores() {
     try {
       logger.info("🔍 Checking for score updates...");
+      this.serviceStatus.lastUpdate = new Date();
 
       const scores = await this.fetchScoresFromAPI();
       const { blackswanScore, marketPeakScore } = scores;
@@ -377,13 +505,24 @@ class BlackSwanOracleService {
       if (success) {
         this.lastKnownBlackSwanScore = blackswanScore;
         this.lastKnownMarketPeakScore = marketPeakScore;
+        this.serviceStatus.lastSuccessfulUpdate = new Date();
+        this.serviceStatus.updateCount++;
+        this.serviceStatus.isHealthy = true;
         logger.info("💾 Cached scores updated");
       } else {
+        this.serviceStatus.errorCount++;
+        this.serviceStatus.isHealthy = false;
         logger.warn(
           "⚠️  Scores not updated in cache due to transaction failure"
         );
       }
     } catch (error) {
+      this.serviceStatus.errorCount++;
+      this.serviceStatus.lastError = {
+        message: error.message,
+        timestamp: new Date(),
+      };
+      this.serviceStatus.isHealthy = false;
       logger.error(`Error during score check: ${error.message}`);
     }
   }
@@ -396,10 +535,25 @@ class BlackSwanOracleService {
 
     this.isRunning = true;
     const pollInterval = parseInt(process.env.POLL_INTERVAL) || 60000; // Default 1 minute
+    const httpPort = parseInt(process.env.PORT) || 8080; // Default port 8080
 
     logger.info(`🚀 BlackSwan Oracle Service starting...`);
     logger.info(`⏰ Polling interval: ${pollInterval / 1000} seconds`);
     logger.info(`🔗 API Endpoint: ${process.env.API_ENDPOINT}`);
+
+    // Start Express server
+    this.httpServer = this.expressApp.listen(httpPort, () => {
+      logger.info(`🌐 HTTP server listening on port ${httpPort}`);
+      logger.info(
+        `📋 Health check available at: http://localhost:${httpPort}/health`
+      );
+      logger.info(
+        `📊 Status endpoint available at: http://localhost:${httpPort}/status`
+      );
+    });
+
+    this.serviceStatus.status = "running";
+    this.serviceStatus.isHealthy = true;
 
     // Initial check
     await this.checkAndUpdateScores();
@@ -422,11 +576,25 @@ class BlackSwanOracleService {
     logger.info("🛑 Stopping BlackSwan Oracle Service...");
 
     this.isRunning = false;
+    this.serviceStatus.status = "stopping";
 
+    // Stop polling interval
     if (this.intervalId) {
       clearInterval(this.intervalId);
     }
 
+    // Stop HTTP server
+    if (this.httpServer) {
+      await new Promise((resolve) => {
+        this.httpServer.close(() => {
+          logger.info("🌐 HTTP server stopped");
+          resolve();
+        });
+      });
+    }
+
+    this.serviceStatus.status = "stopped";
+    this.serviceStatus.isHealthy = false;
     logger.info("✅ Service stopped successfully");
   }
 }
