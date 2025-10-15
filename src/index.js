@@ -28,6 +28,8 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const cors = require("cors");
+const pinataSDK = require("@pinata/sdk");
+const FormData = require("form-data");
 
 // Configure Winston logger with timestamps and emojis
 const logger = winston.createLogger({
@@ -58,8 +60,11 @@ class BlackSwanOracleService {
     this.validateEnvironmentVariables();
     this.initializeBlockchainConnection();
     this.loadContractABI();
+    this.initializePinata();
     this.lastKnownBlackSwanScore = null;
     this.lastKnownMarketPeakScore = null;
+    this.lastKnownBlackSwanIPFS = null;
+    this.lastKnownMarketPeakIPFS = null;
     this.isRunning = false;
     this.expressApp = null;
     this.httpServer = null;
@@ -83,6 +88,8 @@ class BlackSwanOracleService {
       "DEV_WALLET_PRIVATE_KEY",
       "ORACLE_CONTRACT_ADDRESS",
       "API_ENDPOINT",
+      "PINATA_API_KEY",
+      "PINATA_SECRET_API_KEY",
     ];
 
     const missingVars = requiredVars.filter((varName) => !process.env[varName]);
@@ -165,6 +172,22 @@ class BlackSwanOracleService {
           blackswanScore: this.lastKnownBlackSwanScore,
           marketPeakScore: this.lastKnownMarketPeakScore,
         },
+        ipfsHashes: {
+          blackswanIPFS: this.lastKnownBlackSwanIPFS,
+          marketPeakIPFS: this.lastKnownMarketPeakIPFS,
+          blackswanURL: this.lastKnownBlackSwanIPFS
+            ? `https://gateway.pinata.cloud/ipfs/${this.lastKnownBlackSwanIPFS.replace(
+                "ipfs://",
+                ""
+              )}`
+            : null,
+          marketPeakURL: this.lastKnownMarketPeakIPFS
+            ? `https://gateway.pinata.cloud/ipfs/${this.lastKnownMarketPeakIPFS.replace(
+                "ipfs://",
+                ""
+              )}`
+            : null,
+        },
         configuration: {
           pollInterval: parseInt(process.env.POLL_INTERVAL) || 60000,
           apiEndpoint: process.env.API_ENDPOINT,
@@ -172,16 +195,32 @@ class BlackSwanOracleService {
           walletAddress: this.wallet ? this.wallet.address : "Not initialized",
         },
         service: "BlackSwan Oracle",
-        version: "1.0.0",
+        version: "1.1.0",
         timestamp: currentTime,
       });
     });
 
-    // Scores endpoint to get current cached scores
+    // Scores endpoint to get current cached scores and IPFS hashes
     this.expressApp.get("/scores", (req, res) => {
       res.json({
         blackswanScore: this.lastKnownBlackSwanScore,
         marketPeakScore: this.lastKnownMarketPeakScore,
+        ipfsHashes: {
+          blackswanIPFS: this.lastKnownBlackSwanIPFS,
+          marketPeakIPFS: this.lastKnownMarketPeakIPFS,
+          blackswanURL: this.lastKnownBlackSwanIPFS
+            ? `https://gateway.pinata.cloud/ipfs/${this.lastKnownBlackSwanIPFS.replace(
+                "ipfs://",
+                ""
+              )}`
+            : null,
+          marketPeakURL: this.lastKnownMarketPeakIPFS
+            ? `https://gateway.pinata.cloud/ipfs/${this.lastKnownMarketPeakIPFS.replace(
+                "ipfs://",
+                ""
+              )}`
+            : null,
+        },
         lastUpdate: this.serviceStatus.lastUpdate,
         lastSuccessfulUpdate: this.serviceStatus.lastSuccessfulUpdate,
         timestamp: new Date(),
@@ -292,6 +331,97 @@ class BlackSwanOracleService {
     }
   }
 
+  initializePinata() {
+    try {
+      this.pinata = new pinataSDK(
+        process.env.PINATA_API_KEY,
+        process.env.PINATA_SECRET_API_KEY
+      );
+
+      // Test Pinata connection
+      this.pinata
+        .testAuthentication()
+        .then(() => {
+          logger.info("📌 Pinata IPFS connection authenticated successfully");
+        })
+        .catch((error) => {
+          logger.error(`Pinata authentication failed: ${error.message}`);
+          logger.warn("Service will continue but IPFS uploads may fail");
+        });
+    } catch (error) {
+      logger.error(`Failed to initialize Pinata: ${error.message}`);
+      logger.warn("Service will continue but IPFS uploads may fail");
+    }
+  }
+
+  async uploadJSONToIPFS(jsonData, fileName) {
+    try {
+      logger.info(`📤 Uploading ${fileName} to IPFS...`);
+
+      const options = {
+        pinataMetadata: {
+          name: fileName,
+        },
+        pinataOptions: {
+          cidVersion: 0,
+        },
+      };
+
+      const result = await this.pinata.pinJSONToIPFS(jsonData, options);
+      const ipfsHash = result.IpfsHash;
+      const ipfsURI = `ipfs://${ipfsHash}`;
+
+      logger.info(`✅ Successfully uploaded to IPFS: ${ipfsHash}`);
+      logger.info(
+        `🌐 Access at: https://gateway.pinata.cloud/ipfs/${ipfsHash}`
+      );
+      logger.info(`📎 IPFS URI: ${ipfsURI}`);
+
+      return ipfsURI;
+    } catch (error) {
+      logger.error(`Failed to upload ${fileName} to IPFS: ${error.message}`);
+      throw error;
+    }
+  }
+
+  createAnalysisJSON(analysisData, type) {
+    try {
+      const timestamp = new Date().toISOString();
+
+      if (type === "blackswan") {
+        return {
+          type: "BlackSwan Analysis",
+          version: "1.0.0",
+          generatedAt: timestamp,
+          score: analysisData.score,
+          confidence: analysisData.confidence,
+          certainty: analysisData.certainty,
+          analysis: analysisData.analysis,
+          reasoning: analysisData.reasoning,
+          currentMarketIndicators: analysisData.currentMarketIndicators,
+          primaryRiskFactors: analysisData.primaryRiskFactors,
+          timestamp: analysisData.timestamp,
+          dataSource: "BlackSwan AI Analysis Engine",
+        };
+      } else if (type === "marketpeak") {
+        return {
+          type: "Market Peak Analysis",
+          version: "1.0.0",
+          generatedAt: timestamp,
+          score: analysisData.score,
+          summary: analysisData.summary,
+          keyFactors: analysisData.keyFactors,
+          reasoning: analysisData.reasoning,
+          timestamp: analysisData.timestamp,
+          dataSource: "Market Peak AI Analysis Engine",
+        };
+      }
+    } catch (error) {
+      logger.error(`Failed to create ${type} JSON: ${error.message}`);
+      throw error;
+    }
+  }
+
   async fetchScoresFromAPI() {
     try {
       const response = await axios.get(process.env.API_ENDPOINT, {
@@ -351,6 +481,48 @@ class BlackSwanOracleService {
         logger.error("No response received from API");
       } else {
         logger.error(`API fetch error: ${error.message}`);
+      }
+      throw error;
+    }
+  }
+
+  async fetchAnalysisFromAPI() {
+    try {
+      // Use the new analysis endpoint
+      const analysisEndpoint =
+        process.env.API_ANALYSIS_ENDPOINT ||
+        process.env.API_ENDPOINT.replace("/stats", "/analysis");
+
+      const response = await axios.get(analysisEndpoint, {
+        timeout: 30000, // 30 second timeout
+        headers: {
+          "User-Agent": "BlackSwanOracle/1.0",
+        },
+      });
+
+      if (!response.data.blackswan || !response.data.marketPeak) {
+        throw new Error("Unable to extract analysis data from API response");
+      }
+
+      logger.info(
+        `📊 Fetched full analysis from API - BlackSwan: ${response.data.blackswan.score}, MarketPeak: ${response.data.marketPeak.score}`
+      );
+
+      return {
+        blackswan: response.data.blackswan,
+        marketPeak: response.data.marketPeak,
+      };
+    } catch (error) {
+      if (error.code === "ECONNABORTED") {
+        logger.error("Analysis API request timed out");
+      } else if (error.response) {
+        logger.error(
+          `Analysis API returned error ${error.response.status}: ${error.response.statusText}`
+        );
+      } else if (error.request) {
+        logger.error("No response received from Analysis API");
+      } else {
+        logger.error(`Analysis API fetch error: ${error.message}`);
       }
       throw error;
     }
@@ -445,22 +617,151 @@ class BlackSwanOracleService {
     }
   }
 
+  async updateOracleScoresAndAnalysis(
+    newBlackswanScore,
+    newMarketPeakScore,
+    blackSwanIPFS,
+    marketPeakIPFS
+  ) {
+    try {
+      logger.info(`🚀 Updating oracle contract with scores and IPFS hashes`);
+      logger.info(
+        `   BlackSwan: ${newBlackswanScore} | IPFS: ${blackSwanIPFS}`
+      );
+      logger.info(
+        `   MarketPeak: ${newMarketPeakScore} | IPFS: ${marketPeakIPFS}`
+      );
+
+      // Prepare transaction options with Base-optimized settings
+      const txOptions = {
+        gasLimit: process.env.GAS_LIMIT
+          ? parseInt(process.env.GAS_LIMIT)
+          : 200000, // Higher for IPFS string storage
+      };
+
+      // Add gas price options if specified in environment
+      if (process.env.MAX_FEE_PER_GAS_GWEI) {
+        txOptions.maxFeePerGas = ethers.parseUnits(
+          process.env.MAX_FEE_PER_GAS_GWEI,
+          "gwei"
+        );
+      }
+      if (process.env.MAX_PRIORITY_FEE_PER_GAS_GWEI) {
+        txOptions.maxPriorityFeePerGas = ethers.parseUnits(
+          process.env.MAX_PRIORITY_FEE_PER_GAS_GWEI,
+          "gwei"
+        );
+      }
+      if (process.env.GAS_PRICE_GWEI && !txOptions.maxFeePerGas) {
+        txOptions.gasPrice = ethers.parseUnits(
+          process.env.GAS_PRICE_GWEI,
+          "gwei"
+        );
+      }
+
+      // Use the new combined update function
+      const tx = await this.contract.updateScoresAndAnalysis(
+        newBlackswanScore,
+        newMarketPeakScore,
+        blackSwanIPFS,
+        marketPeakIPFS,
+        txOptions
+      );
+
+      logger.info(`⏳ Transaction sent: ${tx.hash}`);
+
+      // Wait for confirmation
+      const receipt = await tx.wait();
+
+      if (receipt.status === 1) {
+        logger.info(`✅ Scores and IPFS hashes updated successfully!`);
+        logger.info(
+          `   Block: ${
+            receipt.blockNumber
+          }, Gas used: ${receipt.gasUsed.toString()}`
+        );
+        // Extract hash from ipfs:// URI for gateway URL
+        const blackSwanHash = blackSwanIPFS.replace("ipfs://", "");
+        const marketPeakHash = marketPeakIPFS.replace("ipfs://", "");
+        logger.info(
+          `   🌐 BlackSwan IPFS: https://gateway.pinata.cloud/ipfs/${blackSwanHash}`
+        );
+        logger.info(
+          `   🌐 MarketPeak IPFS: https://gateway.pinata.cloud/ipfs/${marketPeakHash}`
+        );
+        return true;
+      } else {
+        logger.error("❌ Transaction failed");
+        return false;
+      }
+    } catch (error) {
+      // Handle specific contract errors
+      if (error.reason) {
+        logger.error(`Contract error: ${error.reason}`);
+      } else if (error.message.includes("insufficient funds")) {
+        logger.error("Insufficient funds in dev wallet for transaction");
+      } else if (error.message.includes("nonce")) {
+        logger.error("Nonce error - possible duplicate transaction");
+      } else {
+        logger.error(`Transaction failed: ${error.message}`);
+      }
+      return false;
+    }
+  }
+
   async checkAndUpdateScores() {
     try {
-      logger.info("🔍 Checking for score updates...");
+      logger.info("🔍 Checking for analysis updates...");
       this.serviceStatus.lastUpdate = new Date();
 
-      const scores = await this.fetchScoresFromAPI();
-      const { blackswanScore, marketPeakScore } = scores;
+      // Fetch full analysis data including scores
+      const analysisData = await this.fetchAnalysisFromAPI();
+      const { blackswan, marketPeak } = analysisData;
 
-      // First run - initialize cached scores
+      const blackswanScore = Math.floor(blackswan.score);
+      const marketPeakScore = Math.floor(marketPeak.score);
+
+      // First run - initialize cached data
       if (
         this.lastKnownBlackSwanScore === null ||
         this.lastKnownMarketPeakScore === null
       ) {
-        logger.info("📊 First run - current scores from API will be cached");
-        this.lastKnownBlackSwanScore = blackswanScore;
-        this.lastKnownMarketPeakScore = marketPeakScore;
+        logger.info("📊 First run - initializing cache and uploading to IPFS");
+
+        // Create JSON files for both analyses
+        const blackSwanJSON = this.createAnalysisJSON(blackswan, "blackswan");
+        const marketPeakJSON = this.createAnalysisJSON(
+          marketPeak,
+          "marketpeak"
+        );
+
+        // Upload to IPFS
+        const blackSwanIPFS = await this.uploadJSONToIPFS(
+          blackSwanJSON,
+          `blackswan-analysis-${Date.now()}.json`
+        );
+        const marketPeakIPFS = await this.uploadJSONToIPFS(
+          marketPeakJSON,
+          `marketpeak-analysis-${Date.now()}.json`
+        );
+
+        // Update oracle with initial scores and IPFS hashes
+        const success = await this.updateOracleScoresAndAnalysis(
+          blackswanScore,
+          marketPeakScore,
+          blackSwanIPFS,
+          marketPeakIPFS
+        );
+
+        if (success) {
+          this.lastKnownBlackSwanScore = blackswanScore;
+          this.lastKnownMarketPeakScore = marketPeakScore;
+          this.lastKnownBlackSwanIPFS = blackSwanIPFS;
+          this.lastKnownMarketPeakIPFS = marketPeakIPFS;
+          this.serviceStatus.lastSuccessfulUpdate = new Date();
+          this.serviceStatus.updateCount++;
+          this.serviceStatus.isHealthy = true;
+        }
         return;
       }
 
@@ -476,45 +777,48 @@ class BlackSwanOracleService {
         return;
       }
 
-      // Determine update type
-      let updateType;
-      if (blackswanChanged && marketPeakChanged) {
-        updateType = "both";
-        logger.info(
-          `📈 Both scores changed - BlackSwan: ${this.lastKnownBlackSwanScore} → ${blackswanScore}, MarketPeak: ${this.lastKnownMarketPeakScore} → ${marketPeakScore}`
-        );
-      } else if (blackswanChanged) {
-        updateType = "blackswan";
-        logger.info(
-          `📈 BlackSwan score changed: ${this.lastKnownBlackSwanScore} → ${blackswanScore}`
-        );
-      } else {
-        updateType = "marketpeak";
-        logger.info(
-          `📈 MarketPeak score changed: ${this.lastKnownMarketPeakScore} → ${marketPeakScore}`
-        );
-      }
+      // Scores have changed - create new JSON and upload to IPFS
+      logger.info(
+        `📈 Changes detected - BlackSwan: ${this.lastKnownBlackSwanScore} → ${blackswanScore}, MarketPeak: ${this.lastKnownMarketPeakScore} → ${marketPeakScore}`
+      );
 
-      // Update the oracle with the most efficient method
-      const success = await this.updateOracleScores(
+      // Create JSON files for both analyses (always update both for consistency)
+      logger.info("📝 Creating analysis JSON files...");
+      const blackSwanJSON = this.createAnalysisJSON(blackswan, "blackswan");
+      const marketPeakJSON = this.createAnalysisJSON(marketPeak, "marketpeak");
+
+      // Upload to IPFS
+      logger.info("📤 Uploading analysis to IPFS...");
+      const blackSwanIPFS = await this.uploadJSONToIPFS(
+        blackSwanJSON,
+        `blackswan-analysis-${Date.now()}.json`
+      );
+      const marketPeakIPFS = await this.uploadJSONToIPFS(
+        marketPeakJSON,
+        `marketpeak-analysis-${Date.now()}.json`
+      );
+
+      // Update the oracle with new scores and IPFS hashes
+      const success = await this.updateOracleScoresAndAnalysis(
         blackswanScore,
         marketPeakScore,
-        updateType
+        blackSwanIPFS,
+        marketPeakIPFS
       );
 
       if (success) {
         this.lastKnownBlackSwanScore = blackswanScore;
         this.lastKnownMarketPeakScore = marketPeakScore;
+        this.lastKnownBlackSwanIPFS = blackSwanIPFS;
+        this.lastKnownMarketPeakIPFS = marketPeakIPFS;
         this.serviceStatus.lastSuccessfulUpdate = new Date();
         this.serviceStatus.updateCount++;
         this.serviceStatus.isHealthy = true;
-        logger.info("💾 Cached scores updated");
+        logger.info("💾 All data updated successfully");
       } else {
         this.serviceStatus.errorCount++;
         this.serviceStatus.isHealthy = false;
-        logger.warn(
-          "⚠️  Scores not updated in cache due to transaction failure"
-        );
+        logger.warn("⚠️  Data not updated in cache due to transaction failure");
       }
     } catch (error) {
       this.serviceStatus.errorCount++;
@@ -523,7 +827,7 @@ class BlackSwanOracleService {
         timestamp: new Date(),
       };
       this.serviceStatus.isHealthy = false;
-      logger.error(`Error during score check: ${error.message}`);
+      logger.error(`Error during analysis check: ${error.message}`);
     }
   }
 

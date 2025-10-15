@@ -1,6 +1,6 @@
 {
   "name": "blackswan-oracle",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "BlackSwan Oracle smart contract and Node.js polling service",
   "main": "src/index.js",
   "scripts": {
@@ -11,7 +11,11 @@
     "ethers": "^6.8.1",
     "axios": "^1.5.0",
     "winston": "^3.10.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@pinata/sdk": "^2.1.0",
+    "form-data": "^4.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

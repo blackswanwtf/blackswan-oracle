@@ -59,6 +59,78 @@
   {
     "inputs": [
       {
+        "internalType": "string",
+        "name": "ipfsHash",
+        "type": "string"
+      }
+    ],
+    "name": "updateBlackSwanAnalysisIPFS",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "ipfsHash",
+        "type": "string"
+      }
+    ],
+    "name": "updateMarketPeakAnalysisIPFS",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "blackSwanIPFS",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "marketPeakIPFS",
+        "type": "string"
+      }
+    ],
+    "name": "updateBothAnalysisIPFS",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newBlackSwanScore",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "newMarketPeakScore",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "blackSwanIPFS",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "marketPeakIPFS",
+        "type": "string"
+      }
+    ],
+    "name": "updateScoresAndAnalysis",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "wallet",
         "type": "address"
@@ -110,6 +182,32 @@
   },
   {
     "inputs": [],
+    "name": "blackSwanAnalysisIPFS",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "marketPeakAnalysisIPFS",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "getBothScores",
     "outputs": [
       {
@@ -121,6 +219,52 @@
         "internalType": "uint256",
         "name": "marketPeak",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getBothAnalysisIPFS",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "blackSwanIPFS",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "marketPeakIPFS",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getAllData",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "blackSwan",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "marketPeak",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "blackSwanIPFS",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "marketPeakIPFS",
+        "type": "string"
       }
     ],
     "stateMutability": "view",
@@ -246,6 +390,69 @@
       }
     ],
     "name": "BothScoresUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "ipfsHash",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "updatedBy",
+        "type": "address"
+      }
+    ],
+    "name": "BlackSwanAnalysisIPFSUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "ipfsHash",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "updatedBy",
+        "type": "address"
+      }
+    ],
+    "name": "MarketPeakAnalysisIPFSUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "blackSwanIPFS",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "marketPeakIPFS",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "updatedBy",
+        "type": "address"
+      }
+    ],
+    "name": "BothAnalysisIPFSUpdated",
     "type": "event"
   }
 ]
