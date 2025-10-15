@@ -176,40 +176,86 @@ The oracle uses a UUPS upgradeable contract with:
 
 ### Intelligent Update Strategy
 
-The service implements smart update logic to minimize gas costs:
+The service implements smart update logic to minimize gas costs while ensuring all analysis changes are captured:
 
 1. **Dual Score Monitoring**: Fetches both BlackSwan and Market Peak scores
-2. **Change Detection**: Only triggers updates when scores actually change
-3. **Efficient Transactions**:
-   - **Single Update**: When only one score changes
-   - **Batch Update**: When both scores change simultaneously
-   - **No Update**: When neither score changes
+2. **Deep Content Analysis**: Compares actual analysis content, not just scores
+3. **Change Detection**: Triggers updates when:
+   - **Score Changes**: When BlackSwan or Market Peak scores change
+   - **Content Changes**: When analysis reasoning, indicators, or factors change (even if score stays the same)
+   - **Timestamp Exclusion**: Ignores timestamp-only changes to avoid unnecessary updates
+4. **Efficient Transactions**:
+   - **Combined Update**: Uploads new IPFS JSONs and updates contract scores in one transaction
+   - **No Update**: Only when both score AND content are identical to last update
 
 ### Update Flow
 
 ```
-┌─────────────────┐
-│   Poll API      │
-│   Every Minute  │
-└─────────┬───────┘
-          │
-          ▼
-┌─────────────────┐
-│   Compare       │◄─── Cached Values
-│   with Cache    │
-└─────────┬───────┘
-          │
-          ▼
-   ┌──── Changed? ────┐
-   │                  │
-   Yes                No
-   │                  │
-   ▼                  ▼
-┌─────────────────┐ ┌─────────────────┐
-│   Update        │ │   Continue      │
-│   Contract      │ │   Monitoring    │
-└─────────────────┘ └─────────────────┘
+┌─────────────────────┐
+│   Poll API          │
+│   Every Minute      │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│   Fetch Full        │
+│   Analysis Data     │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────────────────────┐
+│   Deep Content Comparison           │
+│   - Compare scores                  │
+│   - Compare analysis text           │◄─── Cached Analysis
+│   - Compare reasoning               │
+│   - Compare indicators/factors      │
+│   - Exclude timestamps              │
+└──────────┬──────────────────────────┘
+           │
+           ▼
+   ┌────── Real Changes? ──────┐
+   │                           │
+   Yes (Score OR Content)      No (Identical)
+   │                           │
+   ▼                           ▼
+┌─────────────────┐     ┌─────────────────┐
+│  Create JSONs   │     │   Continue      │
+│  Upload IPFS    │     │   Monitoring    │
+│  Update Contract│     └─────────────────┘
+└─────────────────┘
 ```
+
+**Key Features:**
+
+- **Content-Aware**: Detects changes in analysis content even when score remains the same
+- **Timestamp-Safe**: Ignores timestamp-only changes to prevent unnecessary updates
+- **Cost-Optimized**: Only updates blockchain when real analysis changes occur
+- **Comprehensive Logging**: Shows exactly which fields changed in each update
+
+**Fields Compared for BlackSwan Analysis:**
+
+- `score` - The BlackSwan risk score (0-100)
+- `confidence` - Confidence level of the analysis
+- `certainty` - Certainty percentage
+- `analysis` - Detailed analysis text
+- `reasoning` - Array of reasoning points
+- `currentMarketIndicators` - Array of current market indicators
+- `primaryRiskFactors` - Array of primary risk factors
+
+**Fields Compared for Market Peak Analysis:**
+
+- `score` - The Market Peak score (0-100)
+- `summary` - Summary of the market peak analysis
+- `keyFactors` - Array of key factors
+- `reasoning` - Array of reasoning points
+
+**Fields Explicitly Ignored (Not Compared):**
+
+- `timestamp` - API generation timestamp
+- `generatedAt` - JSON file creation timestamp
+- `version` - Analysis version number
+- `type` - Analysis type descriptor
+- `dataSource` - Data source identifier
 
 ### Gas Optimization
 
@@ -326,9 +372,15 @@ The service provides comprehensive logging with emojis for easy monitoring:
 ```
 2024-01-15 10:30:00 📊 [INFO] 🔍 Checking for analysis updates...
 2024-01-15 10:30:01 📊 [INFO] 📊 Fetched full analysis from API - BlackSwan: 75, MarketPeak: 60
-2024-01-15 10:30:01 📊 [INFO] 📈 Changes detected - BlackSwan: 70 → 75, MarketPeak: 55 → 60
-2024-01-15 10:30:01 📊 [INFO] 📝 Creating analysis JSON files...
-2024-01-15 10:30:02 📊 [INFO] 📤 Uploading analysis to IPFS...
+2024-01-15 10:30:01 📊 [INFO] 🔍 Comparing analysis content for changes...
+2024-01-15 10:30:01 📊 [INFO] 🔍 BlackSwan field 'reasoning' has changed
+2024-01-15 10:30:01 📊 [INFO]    Old: ["Previous market volatility", "Low liquidity signals"]...
+2024-01-15 10:30:01 📊 [INFO]    New: ["Increased market volatility", "Critical liquidity concerns"]...
+2024-01-15 10:30:01 📊 [INFO] 📈 Real changes detected:
+2024-01-15 10:30:01 📊 [INFO]    - BlackSwan score: 70 → 75
+2024-01-15 10:30:01 📊 [INFO]    - BlackSwan analysis content changed (same score: 75)
+2024-01-15 10:30:01 📊 [INFO] 📝 Creating updated analysis JSON files...
+2024-01-15 10:30:02 📊 [INFO] 📤 Uploading updated analysis to IPFS...
 2024-01-15 10:30:03 📊 [INFO] 📤 Uploading blackswan-analysis-1703123456789.json to IPFS...
 2024-01-15 10:30:04 📊 [INFO] ✅ Successfully uploaded to IPFS: QmXx...abc
 2024-01-15 10:30:04 📊 [INFO] 🌐 Access at: https://gateway.pinata.cloud/ipfs/QmXx...abc
@@ -346,6 +398,31 @@ The service provides comprehensive logging with emojis for easy monitoring:
 2024-01-15 10:30:10 📊 [INFO]    🌐 BlackSwan IPFS: https://gateway.pinata.cloud/ipfs/QmXx...abc
 2024-01-15 10:30:10 📊 [INFO]    🌐 MarketPeak IPFS: https://gateway.pinata.cloud/ipfs/QmYy...def
 2024-01-15 10:30:10 📊 [INFO] 💾 All data updated successfully
+```
+
+**Example Log - No Changes (Score and Content Identical):**
+
+```
+2024-01-15 10:31:00 📊 [INFO] 🔍 Checking for analysis updates...
+2024-01-15 10:31:01 📊 [INFO] 📊 Fetched full analysis from API - BlackSwan: 75, MarketPeak: 60
+2024-01-15 10:31:01 📊 [INFO] 🔍 Comparing analysis content for changes...
+2024-01-15 10:31:01 📊 [INFO] 📊 No real changes detected - BlackSwan: 75, MarketPeak: 60
+2024-01-15 10:31:01 📊 [INFO]    (Score and content are identical to last update)
+```
+
+**Example Log - Content Changed, Same Score:**
+
+```
+2024-01-15 10:32:00 📊 [INFO] 🔍 Checking for analysis updates...
+2024-01-15 10:32:01 📊 [INFO] 📊 Fetched full analysis from API - BlackSwan: 75, MarketPeak: 60
+2024-01-15 10:32:01 📊 [INFO] 🔍 Comparing analysis content for changes...
+2024-01-15 10:32:01 📊 [INFO] 🔍 BlackSwan field 'currentMarketIndicators' has changed
+2024-01-15 10:32:01 📊 [INFO]    Old: ["BTC down 5%", "Volume spike"]...
+2024-01-15 10:32:01 📊 [INFO]    New: ["BTC down 8%", "Record volume spike", "New regulatory concerns"]...
+2024-01-15 10:32:01 📊 [INFO] 📈 Real changes detected:
+2024-01-15 10:32:01 📊 [INFO]    - BlackSwan analysis content changed (same score: 75)
+2024-01-15 10:32:02 📊 [INFO] 📝 Creating updated analysis JSON files...
+[...continues with IPFS upload and contract update...]
 ```
 
 ### Log Categories

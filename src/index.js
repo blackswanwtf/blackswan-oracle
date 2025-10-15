@@ -16,7 +16,7 @@
  *
  * Author: Muhammad Bilal Motiwala
  * Project: Black Swan
- * Version: 1.0.0
+ * Version: 1.1.0
  * License: MIT
  */
 
@@ -65,6 +65,8 @@ class BlackSwanOracleService {
     this.lastKnownMarketPeakScore = null;
     this.lastKnownBlackSwanIPFS = null;
     this.lastKnownMarketPeakIPFS = null;
+    this.lastKnownBlackSwanAnalysis = null;
+    this.lastKnownMarketPeakAnalysis = null;
     this.isRunning = false;
     this.expressApp = null;
     this.httpServer = null;
@@ -381,6 +383,75 @@ class BlackSwanOracleService {
     } catch (error) {
       logger.error(`Failed to upload ${fileName} to IPFS: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Deep comparison of analysis data excluding timestamp fields
+   * Returns true if there are REAL differences in the analysis content
+   */
+  hasAnalysisContentChanged(newData, oldData, type) {
+    // If no old data exists, there's a change
+    if (!oldData) {
+      return true;
+    }
+
+    try {
+      if (type === "blackswan") {
+        // Compare all meaningful fields for BlackSwan analysis
+        const fieldsToCompare = [
+          "score",
+          "confidence",
+          "certainty",
+          "analysis",
+          "reasoning",
+          "currentMarketIndicators",
+          "primaryRiskFactors",
+        ];
+
+        for (const field of fieldsToCompare) {
+          const newValue = newData[field];
+          const oldValue = oldData[field];
+
+          // Deep comparison for arrays and objects
+          if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
+            logger.info(`🔍 BlackSwan field '${field}' has changed`);
+            logger.info(
+              `   Old: ${JSON.stringify(oldValue)?.substring(0, 100)}...`
+            );
+            logger.info(
+              `   New: ${JSON.stringify(newValue)?.substring(0, 100)}...`
+            );
+            return true;
+          }
+        }
+      } else if (type === "marketpeak") {
+        // Compare all meaningful fields for Market Peak analysis
+        const fieldsToCompare = ["score", "summary", "keyFactors", "reasoning"];
+
+        for (const field of fieldsToCompare) {
+          const newValue = newData[field];
+          const oldValue = oldData[field];
+
+          // Deep comparison for arrays and objects
+          if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
+            logger.info(`🔍 MarketPeak field '${field}' has changed`);
+            logger.info(
+              `   Old: ${JSON.stringify(oldValue)?.substring(0, 100)}...`
+            );
+            logger.info(
+              `   New: ${JSON.stringify(newValue)?.substring(0, 100)}...`
+            );
+            return true;
+          }
+        }
+      }
+
+      return false; // No changes detected
+    } catch (error) {
+      logger.warn(`Error comparing ${type} analysis data: ${error.message}`);
+      // On error, assume there's a change to be safe
+      return true;
     }
   }
 
@@ -758,6 +829,8 @@ class BlackSwanOracleService {
           this.lastKnownMarketPeakScore = marketPeakScore;
           this.lastKnownBlackSwanIPFS = blackSwanIPFS;
           this.lastKnownMarketPeakIPFS = marketPeakIPFS;
+          this.lastKnownBlackSwanAnalysis = blackswan;
+          this.lastKnownMarketPeakAnalysis = marketPeak;
           this.serviceStatus.lastSuccessfulUpdate = new Date();
           this.serviceStatus.updateCount++;
           this.serviceStatus.isHealthy = true;
@@ -765,30 +838,73 @@ class BlackSwanOracleService {
         return;
       }
 
-      // Check what has changed
-      const blackswanChanged = blackswanScore !== this.lastKnownBlackSwanScore;
-      const marketPeakChanged =
+      // Check what has changed - compare actual analysis content, not just scores
+      logger.info("🔍 Comparing analysis content for changes...");
+      const blackswanScoreChanged =
+        blackswanScore !== this.lastKnownBlackSwanScore;
+      const marketPeakScoreChanged =
         marketPeakScore !== this.lastKnownMarketPeakScore;
 
-      if (!blackswanChanged && !marketPeakChanged) {
+      // Deep content comparison (excluding timestamps)
+      const blackswanContentChanged = this.hasAnalysisContentChanged(
+        blackswan,
+        this.lastKnownBlackSwanAnalysis,
+        "blackswan"
+      );
+      const marketPeakContentChanged = this.hasAnalysisContentChanged(
+        marketPeak,
+        this.lastKnownMarketPeakAnalysis,
+        "marketpeak"
+      );
+
+      // Determine if any real changes occurred
+      const hasRealChanges =
+        blackswanScoreChanged ||
+        marketPeakScoreChanged ||
+        blackswanContentChanged ||
+        marketPeakContentChanged;
+
+      if (!hasRealChanges) {
         logger.info(
-          `📊 No changes - BlackSwan: ${blackswanScore}, MarketPeak: ${marketPeakScore}`
+          `📊 No real changes detected - BlackSwan: ${blackswanScore}, MarketPeak: ${marketPeakScore}`
         );
+        logger.info(`   (Score and content are identical to last update)`);
         return;
       }
 
-      // Scores have changed - create new JSON and upload to IPFS
-      logger.info(
-        `📈 Changes detected - BlackSwan: ${this.lastKnownBlackSwanScore} → ${blackswanScore}, MarketPeak: ${this.lastKnownMarketPeakScore} → ${marketPeakScore}`
-      );
+      // Real changes detected - log what changed
+      const changes = [];
+      if (blackswanScoreChanged) {
+        changes.push(
+          `BlackSwan score: ${this.lastKnownBlackSwanScore} → ${blackswanScore}`
+        );
+      }
+      if (marketPeakScoreChanged) {
+        changes.push(
+          `MarketPeak score: ${this.lastKnownMarketPeakScore} → ${marketPeakScore}`
+        );
+      }
+      if (blackswanContentChanged && !blackswanScoreChanged) {
+        changes.push(
+          `BlackSwan analysis content changed (same score: ${blackswanScore})`
+        );
+      }
+      if (marketPeakContentChanged && !marketPeakScoreChanged) {
+        changes.push(
+          `MarketPeak analysis content changed (same score: ${marketPeakScore})`
+        );
+      }
+
+      logger.info(`📈 Real changes detected:`);
+      changes.forEach((change) => logger.info(`   - ${change}`));
 
       // Create JSON files for both analyses (always update both for consistency)
-      logger.info("📝 Creating analysis JSON files...");
+      logger.info("📝 Creating updated analysis JSON files...");
       const blackSwanJSON = this.createAnalysisJSON(blackswan, "blackswan");
       const marketPeakJSON = this.createAnalysisJSON(marketPeak, "marketpeak");
 
       // Upload to IPFS
-      logger.info("📤 Uploading analysis to IPFS...");
+      logger.info("📤 Uploading updated analysis to IPFS...");
       const blackSwanIPFS = await this.uploadJSONToIPFS(
         blackSwanJSON,
         `blackswan-analysis-${Date.now()}.json`
@@ -811,6 +927,8 @@ class BlackSwanOracleService {
         this.lastKnownMarketPeakScore = marketPeakScore;
         this.lastKnownBlackSwanIPFS = blackSwanIPFS;
         this.lastKnownMarketPeakIPFS = marketPeakIPFS;
+        this.lastKnownBlackSwanAnalysis = blackswan;
+        this.lastKnownMarketPeakAnalysis = marketPeak;
         this.serviceStatus.lastSuccessfulUpdate = new Date();
         this.serviceStatus.updateCount++;
         this.serviceStatus.isHealthy = true;
